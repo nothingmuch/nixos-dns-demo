@@ -5,12 +5,28 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
 
     flake-utils.url = "github:numtide/flake-utils";
+
+    # duplicate this as a separate input, so it's updated
+    adblockStevenBlack = {
+      url = "github:StevenBlack/hosts";
+      flake = false;
+    };
+
+    # a flake which compiles adlists to unbound configs
+    adblock-unbound = {
+      url = "github:MayNiklas/nixos-adblock-unbound";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        adblockStevenBlack.follows = "adblockStevenBlack";
+      };
+    };
   };
 
   outputs = {
     self,
     nixpkgs,
     flake-utils,
+    adblock-unbound,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -43,6 +59,20 @@
                   }: {
                     imports = [
                       (modulesPath + "/virtualisation/qemu-vm.nix")
+
+                      ({pkgs, ...}: let
+                        adlist = adblock-unbound.packages.${pkgs.system};
+                      in {
+                        services.unbound = {
+                          enable = true;
+                          settings = {
+                            server = {
+                              include = [''"${adlist.unbound-adblockStevenBlack}"''];
+                            };
+                            remote-control.control-enable = true;
+                          };
+                        };
+                      })
                     ];
 
                     virtualisation.graphics = false;
@@ -56,6 +86,18 @@
 
                     services.getty.helpLine = lib.mkAfter ''
                       OH HAI!
+
+                      Unbound is enabled and configured as the local resolver.
+
+                      Use the host command to make queries. Try comparing some
+                      queries using the local resolver vs. say quad 1:
+
+                          > host ads.google.com
+                          > host ads.google.com 1.1.1.1
+
+                      The blocklist is included from:
+
+                          ${adblock-unbound.packages.${pkgs.system}.unbound-adblockStevenBlack}
                     '';
 
                     # Power off VM when the user exits the shell
